@@ -1,4 +1,4 @@
-# Made by Lytix 01.01.2020
+# Made by Lytix 18.07.2020
 import pygame
 from random import randint, uniform, choice
 import math
