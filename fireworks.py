@@ -1,175 +1,195 @@
-# Made by Lytix 18.07.2020
+# Made by Lytix 18.07.2020, updated 13.01.2022
 import pygame
 from random import randint, uniform, choice
 import math
 
-vector = pygame.math.Vector2
-gravity = vector(0, 0.3)
-DISPLAY_WIDTH = DISPLAY_HEIGHT = 800
+vector2 = pygame.math.Vector2
+trails = []
+fade_p = []
 
-trail_colours = [(45, 45, 45), (60, 60, 60), (75, 75, 75), (125, 125, 125), (150, 150, 150)]
-dynamic_offset = 1
-static_offset = 5
+# general
+GRAVITY_FIREWORK = vector2(0, 0.3)
+GRAVITY_PARTICLE = vector2(0, 0.07)
+DISPLAY_WIDTH = DISPLAY_HEIGHT = 800
+BACKGROUND_COLOR = (20, 20, 30) 
+# firework
+FIREWORK_SPEED_MIN = 17
+FIREWORK_SPEED_MAX = 20
+FIREWORK_SIZE = 5
+# particle
+PARTICLE_LIFESPAN = 70
+X_SPREAD = 0.8
+Y_SPREAD = 0.8
+PARTICLE_SIZE = 4
+MIN_PARTICLES = 100
+MAX_PARTICLES = 200
+X_WIGGLE_SCALE = 20  # higher -> less wiggle
+Y_WIGGLE_SCALE = 10
+EXPLOSION_RADIUS_MIN = 10
+EXPLOSION_RADIUS_MAX = 25
+COLORFUL = True
+# trail
+TRAIL_LIFESPAN = PARTICLE_LIFESPAN / 2
+TRAIL_FREQUENCY = 10  # higher -> less trails
+TRAILS = True
+#FADE_COLOURS = [(45, 45, 45), (60, 60, 60), (75, 75, 75), (125, 125, 125), (150, 150, 150)]
 
 
 class Firework:
-
     def __init__(self):
-        self.colour = (randint(0, 255), randint(0, 255), randint(0, 255))
-        self.colours = (
-        (randint(0, 255), randint(0, 255), randint(0, 255)), (randint(0, 255), randint(0, 255), randint(0, 255)),
-        (randint(0, 255), randint(0, 255), randint(0, 255)))
-        self.firework = Particle(randint(0, DISPLAY_WIDTH), DISPLAY_HEIGHT, True,
-                                 self.colour)  # Creates the firework particle
+        self.colour = tuple(randint(0, 255) for _ in range(3))
+        self.colours = tuple(tuple(randint(0, 255) for _ in range(3)) for _ in range(3))
+        # Creates the firework particle
+        self.firework = Particle(randint(0, DISPLAY_WIDTH), DISPLAY_HEIGHT, True, self.colour)
         self.exploded = False
         self.particles = []
-        self.min_max_particles = vector(100, 225)
 
-    def update(self, win):  # called every frame
+    def update(self, win: pygame.Surface) -> None:
+        # method called every frame
         if not self.exploded:
-            self.firework.apply_force(gravity)
+            self.firework.apply_force(GRAVITY_FIREWORK)
             self.firework.move()
-            for tf in self.firework.trails:
-                tf.show(win)
-
             self.show(win)
-
             if self.firework.vel.y >= 0:
                 self.exploded = True
                 self.explode()
+
         else:
             for particle in self.particles:
-                particle.apply_force(vector(gravity.x + uniform(-1, 1) / 20, gravity.y / 2 + (randint(1, 8) / 100)))
-                particle.move()
-                for t in particle.trails:
-                    t.show(win)
+                particle.update()
                 particle.show(win)
 
     def explode(self):
-        amount = randint(self.min_max_particles.x, self.min_max_particles.y)
-        for i in range(amount):
-            self.particles.append(Particle(self.firework.pos.x, self.firework.pos.y, False, self.colours))
+        # when the firework has entered a stand still, create the explosion particles
+        amount = randint(MIN_PARTICLES, MAX_PARTICLES)
+        if COLORFUL:
+            self.particles = [Particle(self.firework.pos.x, self.firework.pos.y, False, choice(self.colours)) for _ in range(amount)]
+        else:
+            self.particles = [Particle(self.firework.pos.x, self.firework.pos.y, False, self.colour) for _ in range(amount)]
 
-    def show(self, win):
-        pygame.draw.circle(win, self.colour, (int(self.firework.pos.x), int(self.firework.pos.y)), self.firework.size)
+    def show(self, win: pygame.Surface) -> None:
+        # draw the firework on the given surface
+        x = int(self.firework.pos.x)
+        y = int(self.firework.pos.y)
+        pygame.draw.circle(win, self.colour, (x, y), self.firework.size)
 
-    def remove(self):
-        if self.exploded:
-            for p in self.particles:
-                if p.remove is True:
-                    self.particles.remove(p)
+    def remove(self) -> bool:
+        if not self.exploded:
+            return False
 
-            if len(self.particles) == 0:
-                return True
-            else:
-                return False
+        for p in self.particles:
+            if p.remove:
+                self.particles.remove(p)
+
+        # remove the firework object if all particles are gone
+        return len(self.particles) == 0
 
 
-class Particle:
-
+class Particle(object):
     def __init__(self, x, y, firework, colour):
         self.firework = firework
-        self.pos = vector(x, y)
-        self.origin = vector(x, y)
-        self.radius = 20
+        self.pos = vector2(x, y)
+        self.origin = vector2(x, y)
+        self.acc = vector2(0, 0)
         self.remove = False
-        self.explosion_radius = randint(5, 18)
+        self.explosion_radius = randint(EXPLOSION_RADIUS_MIN, EXPLOSION_RADIUS_MAX)
         self.life = 0
-        self.acc = vector(0, 0)
-        # trail variables
-        self.trails = []  # stores the particles trail objects
-        self.prev_posx = [-10] * 10  # stores the 10 last positions
-        self.prev_posy = [-10] * 10  # stores the 10 last positions
+        self.colour = colour
+        self.trail_frequency = TRAIL_FREQUENCY + randint(-3, 3)
 
         if self.firework:
-            self.vel = vector(0, -randint(17, 20))
-            self.size = 5
-            self.colour = colour
-            for i in range(5):
-                self.trails.append(Trail(i, self.size, True))
+            self.vel = vector2(0, -randint(FIREWORK_SPEED_MIN, FIREWORK_SPEED_MAX))
+            self.size = FIREWORK_SIZE
         else:
-            self.vel = vector(uniform(-1, 1), uniform(-1, 1))
+            # set random position of particle 
+            self.vel = vector2(uniform(-1, 1), uniform(-1, 1))
             self.vel.x *= randint(7, self.explosion_radius + 2)
             self.vel.y *= randint(7, self.explosion_radius + 2)
-            self.size = randint(2, 4)
-            self.colour = choice(colour)
-            for i in range(5):
-                self.trails.append(Trail(i, self.size, False))
+            self.size = randint(PARTICLE_SIZE - 1, PARTICLE_SIZE + 1)
+            # update pos and remove particle if outside radius
+            self.move()
+            self.outside_spawn_radius()
 
-    def apply_force(self, force):
+    def update(self) -> None:
+        # called every frame
+        self.life += 1
+        # add a new trail if life % x == 0
+        if self.life % self.trail_frequency == 0:
+            trails.append(Trail(self.pos.x, self.pos.y, False, self.colour, self.size))
+        # wiggle
+        self.apply_force(vector2(uniform(-1, 1) / X_WIGGLE_SCALE, GRAVITY_PARTICLE.y + uniform(-1, 1) / Y_WIGGLE_SCALE))
+        self.move()
+
+    def apply_force(self, force: pygame.math.Vector2) -> None:
         self.acc += force
 
-    def move(self):
+    def outside_spawn_radius(self) -> bool:
+        # if the particle spawned is outside of the radius that creates the circular firework, remov it
+        distance = math.sqrt((self.pos.x - self.origin.x) ** 2 + (self.pos.y - self.origin.y) ** 2)
+        return distance > self.explosion_radius
+
+    def move(self) -> None:
+        # called every frame, moves the particle
         if not self.firework:
-            self.vel.x *= 0.8
-            self.vel.y *= 0.8
+            self.vel.x *= X_SPREAD
+            self.vel.y *= Y_SPREAD
 
         self.vel += self.acc
         self.pos += self.vel
         self.acc *= 0
 
-        if self.life == 0 and not self.firework:  # check if particle is outside explosion radius
-            distance = math.sqrt((self.pos.x - self.origin.x) ** 2 + (self.pos.y - self.origin.y) ** 2)
-            if distance > self.explosion_radius:
-                self.remove = True
-
         self.decay()
 
-        self.trail_update()
+    def show(self, win: pygame.Surface) -> None:
+        # draw the particle on to the surface
+        x = int(self.pos.x)
+        y = int(self.pos.y)
+        pygame.draw.circle(win, self.colour, (x, y), self.size)
 
+    def decay(self) -> None:
+        # random decay of the particles
+        if self.life > PARTICLE_LIFESPAN:
+            if randint(0, 15) == 0:
+                self.remove = True
+        # if too old, begone
+        if not self.remove and self.life > PARTICLE_LIFESPAN * 1.5:
+            self.remove = True
+
+
+class Trail(Particle):
+    def __init__(self, x, y, is_firework, colour, parent_size):
+        Particle.__init__(self, x, y, is_firework, colour)
+        self.size = parent_size - 1
+
+    def decay(self) -> bool:
+        # decay also changes the color on the trails
+        # returns true if to be removed, else false
         self.life += 1
+        if self.life % 100 == 0:
+            self.size -= 1
 
-    def show(self, win):
-        pygame.draw.circle(win, (self.colour[0], self.colour[1], self.colour[2], 0), (int(self.pos.x), int(self.pos.y)),
-                           self.size)
+        self.size = max(0, self.size)
+        # static yellow-ish colour self.colour = (255, 255, 220)
+        self.colour = (min(self.colour[0] + 5, 255), min(self.colour[1] + 5, 255), min(self.colour[2] + 5, 255))
 
-    def decay(self):  # random decay of the particles
-        if 50 > self.life > 10:  # early stage their is a small chance of decay
-            ran = randint(0, 30)
+        if self.life > TRAIL_LIFESPAN:
+            ran = randint(0, 15)
             if ran == 0:
-                self.remove = True
-        elif self.life > 50:
-            ran = randint(0, 5)
-            if ran == 0:
-                self.remove = True
-
-    def trail_update(self):
-        self.prev_posx.pop()
-        self.prev_posx.insert(0, int(self.pos.x))
-        self.prev_posy.pop()
-        self.prev_posy.insert(0, int(self.pos.y))
-
-        for n, t in enumerate(self.trails):
-            if t.dynamic:
-                t.get_pos(self.prev_posx[n + dynamic_offset], self.prev_posy[n + dynamic_offset])
-            else:
-                t.get_pos(self.prev_posx[n + static_offset], self.prev_posy[n + static_offset])
+                return True
+        # if too old, begone
+        if not self.remove and self.life > TRAIL_LIFESPAN * 1.5:
+            return True
+        
+        return False
 
 
-class Trail:
+def update(win: pygame.Surface, fireworks: list, trails: list) -> None:
+    if TRAILS:
+        for t in trails:
+            t.show(win)
+            if t.decay():
+                trails.remove(t)
 
-    def __init__(self, n, size, dynamic):
-        self.pos_in_line = n
-        self.pos = vector(-10, -10)
-        self.dynamic = dynamic
-
-        if self.dynamic:
-            self.colour = trail_colours[n]
-            self.size = int(size - n / 2)
-        else:
-            self.colour = (255, 255, 200)
-            self.size = size - 2
-            if self.size < 0:
-                self.size = 0
-
-    def get_pos(self, x, y):
-        self.pos = vector(x, y)
-
-    def show(self, win):
-        pygame.draw.circle(win, self.colour, (int(self.pos.x), int(self.pos.y)), self.size)
-
-
-def update(win, fireworks):
     for fw in fireworks:
         fw.update(win)
         if fw.remove():
@@ -184,7 +204,7 @@ def main():
     win = pygame.display.set_mode((DISPLAY_WIDTH, DISPLAY_HEIGHT))
     clock = pygame.time.Clock()
 
-    fireworks = [Firework() for i in range(2)]  # create the first fireworks
+    fireworks = [Firework() for i in range(1)]  # create the first fireworks
     running = True
 
     while running:
@@ -193,18 +213,18 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
 
-            if event.type == pygame.KEYDOWN:  # Change game speed with number keys
+            elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_1:
                     fireworks.append(Firework())
-                if event.key == pygame.K_2:
+                elif event.key == pygame.K_2:
                     for i in range(10):
                         fireworks.append(Firework())
-        win.fill((20, 20, 30))  # draw background
+        win.fill(BACKGROUND_COLOR)  # draw background
 
-        if randint(0, 20) == 1:  # create new firework
+        if randint(0, 70) == 1:  # create new firework
             fireworks.append(Firework())
-
-        update(win, fireworks)
+        
+        update(win, fireworks, trails)
 
         # stats for fun
         # total_particles = 0
